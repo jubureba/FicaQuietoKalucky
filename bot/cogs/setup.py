@@ -20,11 +20,6 @@ CHANNELS_CONFIG = {
         "name": "painel-controle",
         "topic": "Painel de controle do FicaQuietoKalucky",
         "icon_name": "🎮"
-    },
-    "config": {
-        "name": "config-bot",
-        "topic": "Configuração do FicaQuietoKalucky",
-        "icon_name": "⚙️"
     }
 }
 
@@ -50,6 +45,12 @@ class SetupCog(commands.Cog):
     async def before_setup(self):
         await self.bot.wait_until_ready()
 
+    async def refresh_panel_for_guild(self, guild: discord.Guild):
+        """Atualiza o painel de um servidor específico sob demanda"""
+        channel = discord.utils.get(guild.text_channels, name=CHANNELS_CONFIG["painel"]["name"])
+        if channel:
+            await self._update_panel(guild, channel)
+
     async def _ensure_channels(self, guild: discord.Guild):
         """Garante que todos os canais necessários existem"""
         try:
@@ -58,19 +59,19 @@ class SetupCog(commands.Cog):
 
                 if not channel:
                     # Cria o canal
-                    await self._create_channel(guild, config)
+                    channel = await self._create_channel(guild, config, channel_type)
                 else:
                     # Valida permissões
                     await self._setup_permissions(guild, channel)
 
-                    # Se for painel, atualiza o painel
-                    if channel_type == "painel":
-                        await self._update_panel(guild, channel)
+                # Se for painel, atualiza o painel
+                if channel_type == "painel" and channel:
+                    await self._update_panel(guild, channel)
 
         except Exception as e:
             logger.error(f"Erro ao garantir canais em {guild.name}: {e}")
 
-    async def _create_channel(self, guild: discord.Guild, config: dict):
+    async def _create_channel(self, guild: discord.Guild, config: dict, channel_type: str = ""):
         """Cria um novo canal com permissões corretas"""
         try:
             # Permissões padrão: apenas bot pode enviar
@@ -87,16 +88,19 @@ class SetupCog(commands.Cog):
 
             logger.info(f"✅ Canal {config['name']} criado em {guild.name}")
 
-            # Envia mensagem inicial
-            embed = discord.Embed(
-                title=f"{config['icon_name']} {config['name'].upper()}",
-                description=config["topic"],
-                color=discord.Color.blurple()
-            )
-            await channel.send(embed=embed)
+            # Envia mensagem inicial apenas se não for o painel (o painel é enviado em _update_panel)
+            if channel_type != "painel":
+                embed = discord.Embed(
+                    title=f"{config['icon_name']} {config['name'].upper()}",
+                    description=config["topic"],
+                    color=discord.Color.blurple()
+                )
+                await channel.send(embed=embed)
 
+            return channel
         except Exception as e:
             logger.error(f"Erro ao criar canal {config['name']}: {e}")
+            return None
 
     async def _setup_permissions(self, guild: discord.Guild, channel: discord.TextChannel):
         """Configura permissões do canal"""
@@ -121,28 +125,16 @@ class SetupCog(commands.Cog):
             logger.error(f"Erro ao configurar permissões: {e}")
 
     async def _update_panel(self, guild: discord.Guild, channel: discord.TextChannel):
-        """Atualiza o painel no canal"""
+        """Atualiza o painel no canal editando a mensagem existente"""
         try:
             from .interactive import PainelView
-
-            # Limpa TODAS as mensagens antigas do painel
-            deleted_count = 0
-            async for msg in channel.history(limit=50):
-                if msg.author == self.bot.user:
-                    try:
-                        await msg.delete()
-                        deleted_count += 1
-                    except:
-                        pass
-
-            if deleted_count > 0:
-                logger.info(f"🗑️ Deletadas {deleted_count} mensagens antigas do painel")
+            from utils.config_manager import ConfigManager
 
             # Obtém configurações atuais
-            from utils.config_manager import ConfigManager
             config = ConfigManager.load_config(guild.id)
             default_group = config.get("default_group") or "❌ Não configurado"
             default_channel = config.get("default_channel") or "❌ Não configurado"
+            officers_role = config.get("officers_role") or "❌ Não configurado"
             officers_channel = config.get("officers_channel") or "❌ Não configurado"
 
             # Cria painel profissional
@@ -169,7 +161,12 @@ class SetupCog(commands.Cog):
                 inline=True
             )
             embed.add_field(
-                name="👑 Sala de Officers",
+                name="👑 Cargo Officers",
+                value=f"`{officers_role}`",
+                inline=True
+            )
+            embed.add_field(
+                name="🔊 Canal Officers",
                 value=f"`{officers_channel}`",
                 inline=True
             )
@@ -182,17 +179,17 @@ class SetupCog(commands.Cog):
             )
             embed.add_field(
                 name="🎮 Mover Jogadores",
-                value="Move todos do grupo padrão para o canal configurado\n` clique no botão abaixo`",
+                value="Move todos do grupo padrão para o canal configurado\n`clique no botão abaixo`",
                 inline=False
             )
             embed.add_field(
                 name="👑 Mover Officers",
-                value="Move todos os officers para a sala deles\n`clique no botão abaixo`",
+                value="Move todos os officers para a sala configurada\n`clique no botão abaixo`",
                 inline=False
             )
             embed.add_field(
                 name="⚙️ Configurações",
-                value="Altere grupo, canal e sala de officers\n`clique no botão abaixo`",
+                value="Altere grupos, canais e cargos de officers\n`clique no botão abaixo`",
                 inline=False
             )
 
@@ -207,16 +204,47 @@ class SetupCog(commands.Cog):
             )
 
             embed.set_footer(
-                text="FicaQuietoKalucky v1.0.0 | Última atualização: agora",
+                text="FicaQuietoKalucky v1.0.0",
                 icon_url=guild.icon.url if guild.icon else None
             )
             embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
 
             view = PainelView(guild)
-            msg = await channel.send(embed=embed, view=view)
-            self.panel_message_id[guild.id] = msg.id
 
-            logger.info(f"✅ Painel atualizado em {guild.name}")
+            # Procura por mensagem existente do painel
+            target_message = None
+            saved_id = ConfigManager.get_panel_message_id(guild.id) or self.panel_message_id.get(guild.id)
+            if saved_id:
+                try:
+                    target_message = await channel.fetch_message(saved_id)
+                except Exception:
+                    target_message = None
+
+            if not target_message:
+                async for msg in channel.history(limit=20):
+                    if msg.author == self.bot.user:
+                        target_message = msg
+                        break
+
+            if target_message:
+                await target_message.edit(embed=embed, view=view)
+                panel_id = target_message.id
+                logger.info(f"✅ Painel editado/atualizado em {guild.name}")
+            else:
+                msg = await channel.send(embed=embed, view=view)
+                panel_id = msg.id
+                logger.info(f"✅ Novo painel criado e enviado em {guild.name}")
+
+            self.panel_message_id[guild.id] = panel_id
+            ConfigManager.set_panel_message_id(guild.id, panel_id)
+
+            # Limpa mensagens duplicadas extras do bot se houver
+            async for extra_msg in channel.history(limit=20):
+                if extra_msg.author == self.bot.user and extra_msg.id != panel_id:
+                    try:
+                        await extra_msg.delete()
+                    except Exception:
+                        pass
 
         except Exception as e:
             logger.error(f"Erro ao atualizar painel: {e}")
@@ -319,7 +347,7 @@ class SetupCog(commands.Cog):
         )
         embed.add_field(
             name="📋 Canais Criados",
-            value="• 🔐 auditoria-bot\n• 🎮 painel-controle\n• ⚙️ config-bot",
+            value="• 🔐 auditoria-bot\n• 🎮 painel-controle",
             inline=False
         )
         embed.add_field(

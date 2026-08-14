@@ -86,16 +86,16 @@ python run.py
 ## 📖 Uso
 
 ### Primeira Vez
-1. Bot cria **3 canais automáticos**:
+1. Bot cria **2 canais automáticos**:
    - 🔐 `auditoria-bot` - Log de ações
-   - 🎮 `painel-controle` - Painel principal
-   - ⚙️ `config-bot` - Reservado
+   - 🎮 `painel-controle` - Painel principal com botões interativos
 
-2. Clique em **⚙️ Configurações**
+2. Clique em **⚙️ Configurações** no painel
 3. Configure:
    - 👥 Grupo padrão (ex: "jogador")
    - 📍 Canal padrão (ex: "sala-1")
-   - 👑 Sala de officers (criada automaticamente)
+   - 👑 Cargo de officers (ex: "officer" ou qualquer cargo do servidor)
+   - 🔊 Canal de officers (ex: "sala-officers" ou qualquer canal de voz)
 
 ### Uso Diário
 1. Vá para `#painel-controle`

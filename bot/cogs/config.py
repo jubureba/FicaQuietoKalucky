@@ -23,6 +23,16 @@ async def delete_after(message, delay=DELETE_AFTER):
         pass
 
 
+async def refresh_panel(bot, guild: discord.Guild):
+    """Atualiza o painel de controle após alterações de config"""
+    try:
+        setup_cog = bot.get_cog("SetupCog")
+        if setup_cog:
+            await setup_cog.refresh_panel_for_guild(guild)
+    except Exception as e:
+        logger.error(f"Erro ao atualizar painel após config: {e}")
+
+
 class ConfigView(ui.View):
     """View para configurar o bot"""
 
@@ -30,7 +40,7 @@ class ConfigView(ui.View):
         super().__init__(timeout=timeout)
         self.guild = guild
 
-    @ui.button(label="👥 Grupo Padrão", style=discord.ButtonStyle.blurple)
+    @ui.button(label="👥 Grupo Padrão", style=discord.ButtonStyle.blurple, row=0)
     async def set_default_group(self, interaction: discord.Interaction, button: ui.Button):
         """Define o grupo/cargo padrão"""
         if not await CommandValidator.validate_admin(interaction.user):
@@ -63,28 +73,30 @@ class ConfigView(ui.View):
             max_values=1,
             options=[
                 discord.SelectOption(
-                    label=r.name,
+                    label=r.name[:100],
                     value=str(r.id),
-                    description=f"{len(r.members)} membros"
+                    description=f"{len(r.members)} membros"[:100]
                 )
-                for r in roles
+                for r in roles[:25]
             ]
         )
 
         async def callback(inter: discord.Interaction):
             role_id = select.values[0]
             role = self.guild.get_role(int(role_id))
-            ConfigManager.set_default_group(self.guild.id, role.name)
+            if role:
+                ConfigManager.set_default_group(self.guild.id, role.name)
+                await refresh_panel(inter.client, self.guild)
 
-            await inter.response.defer()
-            embed = discord.Embed(
-                title="✅ Grupo Padrão Configurado",
-                description=f"Grupo padrão definido para: **{role.name}**\n\n"
-                            f"👥 Membros com este cargo: **{len(role.members)}**",
-                color=discord.Color.green()
-            )
-            msg = await inter.followup.send(embed=embed)
-            asyncio.create_task(delete_after(msg, 5))
+                await inter.response.defer()
+                embed = discord.Embed(
+                    title="✅ Grupo Padrão Configurado",
+                    description=f"Grupo padrão definido para: **{role.name}**\n\n"
+                                f"👥 Membros com este cargo: **{len(role.members)}**",
+                    color=discord.Color.green()
+                )
+                msg = await inter.followup.send(embed=embed)
+                asyncio.create_task(delete_after(msg, 5))
 
         select.callback = callback
 
@@ -105,7 +117,7 @@ class ConfigView(ui.View):
         msg = await interaction.followup.send(embed=embed, view=view)
         asyncio.create_task(delete_after(msg, 30))  # 30s para interagir
 
-    @ui.button(label="📍 Canal Padrão", style=discord.ButtonStyle.blurple)
+    @ui.button(label="📍 Canal Padrão", style=discord.ButtonStyle.blurple, row=0)
     async def set_default_channel(self, interaction: discord.Interaction, button: ui.Button):
         """Define o canal padrão"""
         if not await CommandValidator.validate_admin(interaction.user):
@@ -138,28 +150,30 @@ class ConfigView(ui.View):
             max_values=1,
             options=[
                 discord.SelectOption(
-                    label=ch.name,
+                    label=ch.name[:100],
                     value=str(ch.id),
-                    description=f"{len(ch.members)} membros conectados"
+                    description=f"{len(ch.members)} membros conectados"[:100]
                 )
-                for ch in channels
+                for ch in channels[:25]
             ]
         )
 
         async def callback(inter: discord.Interaction):
             channel_id = select.values[0]
             channel = self.guild.get_channel(int(channel_id))
-            ConfigManager.set_default_channel(self.guild.id, channel.name)
+            if channel:
+                ConfigManager.set_default_channel(self.guild.id, channel.name)
+                await refresh_panel(inter.client, self.guild)
 
-            await inter.response.defer()
-            embed = discord.Embed(
-                title="✅ Canal Padrão Configurado",
-                description=f"Canal padrão definido para: **{channel.name}**\n\n"
-                            f"👥 Membros conectados: **{len(channel.members)}**",
-                color=discord.Color.green()
-            )
-            msg = await inter.followup.send(embed=embed)
-            asyncio.create_task(delete_after(msg, 5))
+                await inter.response.defer()
+                embed = discord.Embed(
+                    title="✅ Canal Padrão Configurado",
+                    description=f"Canal padrão definido para: **{channel.name}**\n\n"
+                                f"👥 Membros conectados: **{len(channel.members)}**",
+                    color=discord.Color.green()
+                )
+                msg = await inter.followup.send(embed=embed)
+                asyncio.create_task(delete_after(msg, 5))
 
         select.callback = callback
 
@@ -180,7 +194,83 @@ class ConfigView(ui.View):
         msg = await interaction.followup.send(embed=embed, view=view)
         asyncio.create_task(delete_after(msg, 30))  # 30s para interagir
 
-    @ui.button(label="👑 Sala de Officers", style=discord.ButtonStyle.success)
+    @ui.button(label="👑 Cargo Officers", style=discord.ButtonStyle.success, row=1)
+    async def set_officers_role(self, interaction: discord.Interaction, button: ui.Button):
+        """Define o cargo exclusivo de officers"""
+        if not await CommandValidator.validate_admin(interaction.user):
+            await interaction.response.defer()
+            embed = discord.Embed(
+                title="❌ Acesso Negado",
+                description="Você precisa ser administrador para fazer isso!",
+                color=discord.Color.red()
+            )
+            msg = await interaction.followup.send(embed=embed)
+            asyncio.create_task(delete_after(msg, 3))
+            return
+
+        roles = [r for r in self.guild.roles if r.name != "@everyone"]
+        if not roles:
+            await interaction.response.defer()
+            embed = discord.Embed(
+                title="❌ Nenhum Cargo Disponível",
+                description="Crie cargos no servidor antes de configurar!",
+                color=discord.Color.red()
+            )
+            msg = await interaction.followup.send(embed=embed)
+            asyncio.create_task(delete_after(msg, 5))
+            return
+
+        select = ui.Select(
+            placeholder="👑 Selecione o cargo de officers",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label=r.name[:100],
+                    value=str(r.id),
+                    description=f"{len(r.members)} membros"[:100]
+                )
+                for r in roles[:25]
+            ]
+        )
+
+        async def callback(inter: discord.Interaction):
+            role_id = select.values[0]
+            role = self.guild.get_role(int(role_id))
+            if role:
+                ConfigManager.set_officers_role(self.guild.id, role.name)
+                await refresh_panel(inter.client, self.guild)
+
+                await inter.response.defer()
+                embed = discord.Embed(
+                    title="✅ Cargo de Officers Configurado",
+                    description=f"Cargo de officers definido para: **{role.name}**\n\n"
+                                f"👥 Membros com este cargo: **{len(role.members)}**",
+                    color=discord.Color.green()
+                )
+                msg = await inter.followup.send(embed=embed)
+                asyncio.create_task(delete_after(msg, 5))
+
+        select.callback = callback
+
+        view = ui.View()
+        view.add_item(select)
+
+        embed = discord.Embed(
+            title="👑 Configurar Cargo de Officers",
+            description="Escolha qual cargo representa os officers",
+            color=discord.Color.gold()
+        )
+        embed.add_field(
+            name="ℹ️ Informação",
+            value="Este cargo será usado no botão **👑 Mover Officers**",
+            inline=False
+        )
+        await interaction.response.defer()
+        msg = await interaction.followup.send(embed=embed, view=view)
+        asyncio.create_task(delete_after(msg, 30))
+
+    @ui.button(label="🔊 Canal Officers", style=discord.ButtonStyle.success, row=1)
     async def set_officers_channel(self, interaction: discord.Interaction, button: ui.Button):
         """Define o canal exclusivo de officers"""
         if not await CommandValidator.validate_admin(interaction.user):
@@ -194,73 +284,82 @@ class ConfigView(ui.View):
             asyncio.create_task(delete_after(msg, 3))
             return
 
-        await interaction.response.defer()
+        channels = self.guild.voice_channels
+        if not channels:
+            await interaction.response.defer()
+            embed = discord.Embed(
+                title="❌ Nenhum Canal de Voz",
+                description="Crie canais de voz no servidor antes de configurar!",
+                color=discord.Color.red()
+            )
+            msg = await interaction.followup.send(embed=embed)
+            asyncio.create_task(delete_after(msg, 5))
+            return
 
-        # Procura ou cria canal de officers
-        channel = discord.utils.get(self.guild.voice_channels, name="sala-officers")
-
-        if not channel:
-            try:
-                # Cria canal de officers
-                overwrites = {
-                    self.guild.default_role: discord.PermissionOverwrite(connect=False),
-                    self.guild.me: discord.PermissionOverwrite(connect=True, manage_channels=True)
-                }
-
-                # Encontra o cargo de officer
-                officer_role = discord.utils.get(self.guild.roles, name="officer")
-                if officer_role:
-                    overwrites[officer_role] = discord.PermissionOverwrite(connect=True)
-
-                channel = await self.guild.create_voice_channel(
-                    name="sala-officers",
-                    overwrites=overwrites
+        select = ui.Select(
+            placeholder="🔊 Selecione o canal de officers",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label=ch.name[:100],
+                    value=str(ch.id),
+                    description=f"{len(ch.members)} membros conectados"[:100]
                 )
-                logger.info(f"✅ Canal 'sala-officers' criado em {self.guild.name}")
+                for ch in channels[:25]
+            ]
+        )
 
+        async def callback(inter: discord.Interaction):
+            channel_id = select.values[0]
+            channel = self.guild.get_channel(int(channel_id))
+            if channel:
+                ConfigManager.set_officers_channel(self.guild.id, channel.name)
+                await refresh_panel(inter.client, self.guild)
+
+                await inter.response.defer()
                 embed = discord.Embed(
-                    title="✅ Canal de Officers Criado",
-                    description=f"Canal exclusivo criado com sucesso!\n\n"
-                                f"📍 Canal: {channel.mention}\n"
-                                f"🔒 Acesso: Apenas Officers\n"
-                                f"👥 Membros: **0**",
+                    title="✅ Canal de Officers Configurado",
+                    description=f"Canal de officers definido para: **{channel.name}**\n\n"
+                                f"👥 Membros conectados: **{len(channel.members)}**",
                     color=discord.Color.green()
                 )
-            except Exception as e:
-                logger.error(f"Erro ao criar canal: {e}")
-                embed = discord.Embed(
-                    title="❌ Erro ao Criar Canal",
-                    description=f"Não foi possível criar o canal:\n\n`{e}`",
-                    color=discord.Color.red()
-                )
-                msg = await interaction.followup.send(embed=embed)
+                msg = await inter.followup.send(embed=embed)
                 asyncio.create_task(delete_after(msg, 5))
-                return
-        else:
-            embed = discord.Embed(
-                title="✅ Canal de Officers Já Existe",
-                description=f"Canal já configurado!\n\n"
-                            f"📍 Canal: {channel.mention}\n"
-                            f"👥 Membros conectados: **{len(channel.members)}**",
-                color=discord.Color.blue()
-            )
 
-        ConfigManager.set_officers_channel(self.guild.id, channel.name)
-        msg = await interaction.followup.send(embed=embed)
-        asyncio.create_task(delete_after(msg, 5))
+        select.callback = callback
 
-    @ui.button(label="📊 Ver Configuração", style=discord.ButtonStyle.secondary)
+        view = ui.View()
+        view.add_item(select)
+
+        embed = discord.Embed(
+            title="🔊 Configurar Canal de Officers",
+            description="Escolha a sala de voz para onde os officers serão movidos",
+            color=discord.Color.gold()
+        )
+        embed.add_field(
+            name="ℹ️ Informação",
+            value="Este canal será usado no botão **👑 Mover Officers**",
+            inline=False
+        )
+        await interaction.response.defer()
+        msg = await interaction.followup.send(embed=embed, view=view)
+        asyncio.create_task(delete_after(msg, 30))
+
+    @ui.button(label="📊 Ver Configuração", style=discord.ButtonStyle.secondary, row=2)
     async def view_config(self, interaction: discord.Interaction, button: ui.Button):
         """Mostra a configuração atual"""
         config = ConfigManager.load_config(self.guild.id)
 
         default_group = config.get("default_group")
         default_channel = config.get("default_channel")
+        officers_role = config.get("officers_role")
         officers_channel = config.get("officers_channel")
 
         # Obter informações adicionais
         group_role = discord.utils.get(self.guild.roles, name=default_group) if default_group else None
         default_ch = discord.utils.get(self.guild.voice_channels, name=default_channel) if default_channel else None
+        off_role = discord.utils.get(self.guild.roles, name=officers_role) if officers_role else None
         officers_ch = discord.utils.get(self.guild.voice_channels, name=officers_channel) if officers_channel else None
 
         embed = discord.Embed(
@@ -280,7 +379,7 @@ class ConfigView(ui.View):
         else:
             embed.add_field(
                 name="👥 Grupo Padrão",
-                value="❌ Não configurado",
+                value=f"{'⚠️ ' + default_group if default_group else '❌ Não configurado'}",
                 inline=True
             )
 
@@ -295,22 +394,37 @@ class ConfigView(ui.View):
         else:
             embed.add_field(
                 name="📍 Canal Padrão",
-                value="❌ Não configurado",
+                value=f"{'⚠️ ' + default_channel if default_channel else '❌ Não configurado'}",
+                inline=True
+            )
+
+        # Cargo de Officers
+        if officers_role and off_role:
+            embed.add_field(
+                name="👑 Cargo Officers",
+                value=f"✅ **{officers_role}**\n"
+                      f"Membros: **{len(off_role.members)}**",
+                inline=True
+            )
+        else:
+            embed.add_field(
+                name="👑 Cargo Officers",
+                value=f"{'⚠️ ' + officers_role if officers_role else '❌ Não configurado'}",
                 inline=True
             )
 
         # Canal de Officers
         if officers_channel and officers_ch:
             embed.add_field(
-                name="👑 Sala de Officers",
+                name="🔊 Canal Officers",
                 value=f"✅ **{officers_channel}**\n"
                       f"Conectados: **{len(officers_ch.members)}**",
                 inline=True
             )
         else:
             embed.add_field(
-                name="👑 Sala de Officers",
-                value="❌ Não configurado",
+                name="🔊 Canal Officers",
+                value=f"{'⚠️ ' + officers_channel if officers_channel else '❌ Não configurado'}",
                 inline=True
             )
 

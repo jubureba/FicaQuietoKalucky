@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils import RoleManager, VoiceManager, CommandValidator
+from utils.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +73,10 @@ class MovementsCog(commands.Cog):
 
     @commands.command(name="mover_officers")
     @commands.guild_only()
-    async def move_officers(self, ctx, *, destination_name: str):
+    async def move_officers(self, ctx, *, destination_name: str = None):
         """Move todos os officers para um canal de voz específico
 
-        Uso: !mover_officers "Sala de Officers"
+        Uso: !mover_officers "Sala de Officers" (ou apenas !mover_officers se configurado)
         """
         if not await CommandValidator.validate_admin(ctx.author):
             embed = discord.Embed(
@@ -86,21 +87,32 @@ class MovementsCog(commands.Cog):
             await ctx.send(embed=embed)
             return
 
-        role = await RoleManager.get_role_by_name(ctx.guild, "officer")
+        role_name = ConfigManager.get_officers_role(ctx.guild.id) or "officer"
+        role = await RoleManager.get_role_by_name(ctx.guild, role_name)
         if not role:
             embed = discord.Embed(
                 title="❌ Cargo não encontrado",
-                description="O cargo 'officer' não existe no servidor.",
+                description=f"O cargo '{role_name}' não existe no servidor. Configure pelo painel.",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
             return
 
-        destination = await VoiceManager.get_voice_channel_by_name(ctx.guild, destination_name)
+        dest_name = destination_name or ConfigManager.get_officers_channel(ctx.guild.id)
+        if not dest_name:
+            embed = discord.Embed(
+                title="❌ Canal de destino não informado",
+                description="Informe o canal de destino ou configure no painel.",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
+            return
+
+        destination = await VoiceManager.get_voice_channel_by_name(ctx.guild, dest_name)
         if not destination:
             embed = discord.Embed(
                 title="❌ Canal não encontrado",
-                description=f"O canal de voz '{destination_name}' não existe no servidor.",
+                description=f"O canal de voz '{dest_name}' não existe no servidor.",
                 color=discord.Color.red(),
             )
             await ctx.send(embed=embed)
@@ -112,7 +124,8 @@ class MovementsCog(commands.Cog):
             title="✅ Officers Movidos",
             color=discord.Color.green(),
         )
-        embed.add_field(name="Destino", value=destination_name, inline=False)
+        embed.add_field(name="Cargo", value=role_name, inline=False)
+        embed.add_field(name="Destino", value=dest_name, inline=False)
         embed.add_field(name="✅ Movidos", value=success, inline=True)
         embed.add_field(name="❌ Falharam", value=failed, inline=True)
 

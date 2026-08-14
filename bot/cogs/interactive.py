@@ -26,7 +26,7 @@ async def delete_after(message, delay=DELETE_AFTER):
 class PainelView(ui.View):
     """Painel simplificado com apenas 3 botões"""
 
-    def __init__(self, guild, timeout=300):
+    def __init__(self, guild, timeout=None):
         super().__init__(timeout=timeout)
         self.guild = guild
 
@@ -52,7 +52,7 @@ class PainelView(ui.View):
             await interaction.response.defer()
             embed = discord.Embed(
                 title="⚠️ Configure Primeiro",
-                description="Clique em **⚙️ Configurações**",
+                description="Clique em **⚙️ Configurações** para configurar o grupo e canal padrão.",
                 color=discord.Color.orange()
             )
             msg = await interaction.followup.send(embed=embed)
@@ -67,7 +67,7 @@ class PainelView(ui.View):
             await interaction.response.defer()
             embed = discord.Embed(
                 title="❌ Erro na Configuração",
-                description="Reconfigure em **⚙️ Configurações**",
+                description="Cargo ou canal padrão não encontrado. Reconfigure em **⚙️ Configurações**",
                 color=discord.Color.red()
             )
             msg = await interaction.followup.send(embed=embed)
@@ -99,7 +99,7 @@ class PainelView(ui.View):
 
     @ui.button(label="👑 Mover Officers", style=discord.ButtonStyle.success)
     async def mover_officers(self, interaction: discord.Interaction, button: ui.Button):
-        """Move officers para o canal específico"""
+        """Move officers para o canal configurado"""
         if not await CommandValidator.validate_admin(interaction.user):
             await interaction.response.defer()
             embed = discord.Embed(
@@ -111,54 +111,46 @@ class PainelView(ui.View):
             asyncio.create_task(delete_after(msg, 3))
             return
 
-        # Obtém canal de officers
+        # Obtém configurações de officers
+        officers_role_name = ConfigManager.get_officers_role(self.guild.id)
         officers_channel_name = ConfigManager.get_officers_channel(self.guild.id)
 
-        if not officers_channel_name:
+        if not officers_role_name or not officers_channel_name:
+            await interaction.response.defer()
             embed = discord.Embed(
-                title="⚠️ Configure Officers",
-                description="Clique em **⚙️ Configurações**",
+                title="⚠️ Configure Officers Primeiro",
+                description="Clique em **⚙️ Configurações** para definir o cargo e o canal de officers.",
                 color=discord.Color.orange()
             )
-            msg = await interaction.response.send_message(embed=embed)
+            msg = await interaction.followup.send(embed=embed)
             asyncio.create_task(delete_after(msg, 5))
             return
 
+        role = await RoleManager.get_role_by_name(self.guild, officers_role_name)
         officers_channel = await VoiceManager.get_voice_channel_by_name(
             self.guild, officers_channel_name
         )
 
-        if not officers_channel:
+        if not role or not officers_channel:
+            await interaction.response.defer()
             embed = discord.Embed(
-                title="❌ Canal Não Encontrado",
-                description="Reconfigure em **⚙️ Configurações**",
-                color=discord.Color.red()
-            )
-            msg = await interaction.response.send_message(embed=embed)
-            asyncio.create_task(delete_after(msg, 5))
-            return
-
-        # Executa movimentação
-        await interaction.response.defer()
-        role = discord.utils.get(self.guild.roles, name="officer")
-
-        if not role:
-            embed = discord.Embed(
-                title="❌ Cargo 'officer' Não Encontrado",
-                description="Crie um cargo chamado 'officer'",
+                title="❌ Erro na Configuração de Officers",
+                description=f"Cargo ('{officers_role_name}') ou Canal ('{officers_channel_name}') não encontrado no servidor. Reconfigure em **⚙️ Configurações**",
                 color=discord.Color.red()
             )
             msg = await interaction.followup.send(embed=embed)
             asyncio.create_task(delete_after(msg, 5))
             return
 
+        # Executa movimentação
+        await interaction.response.defer()
         success, failed = await VoiceManager.move_members_by_role(
             self.guild, role, officers_channel
         )
 
         embed = discord.Embed(
             title="✅ Officers Movidos",
-            description=f"{success} officers movidos para **{officers_channel_name}**",
+            description=f"{success} members do cargo **{officers_role_name}** movidos para **{officers_channel_name}**",
             color=discord.Color.green()
         )
 
@@ -169,6 +161,7 @@ class PainelView(ui.View):
         await self._log_audit(
             "👑 Officers Movidos",
             f"**Admin:** {interaction.user.mention}\n"
+            f"**Cargo:** {officers_role_name}\n"
             f"**Destino:** {officers_channel_name}\n"
             f"**Movidos:** {success} | **Falharam:** {failed}",
             discord.Color.green()

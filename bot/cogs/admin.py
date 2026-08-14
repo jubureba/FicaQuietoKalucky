@@ -41,8 +41,8 @@ class AdminCog(commands.Cog):
             name="📋 Movimentação",
             value="**!mover** <cargo> <canal>\n"
             "Move todos com um cargo para um canal\n\n"
-            "**!mover_officers** <canal>\n"
-            "Move todos os officers para um canal\n\n"
+            "**!mover_officers** [canal]\n"
+            "Move todos os officers para o canal configurado ou especificado\n\n"
             "**!listar_em_voz** <canal>\n"
             "Lista membros em um canal de voz",
             inline=False,
