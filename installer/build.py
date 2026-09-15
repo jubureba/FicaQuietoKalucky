@@ -66,7 +66,7 @@ def main() -> int:
     result = subprocess.run(cmd)
     if result.returncode == 0:
         exe = HERE / "dist" / "FicaQuietoKalucky-Setup.exe"
-        print(f"\n✅ Instalador gerado: {exe}")
+        print(f"\n[OK] Instalador gerado: {exe}")
     return result.returncode
 
 
