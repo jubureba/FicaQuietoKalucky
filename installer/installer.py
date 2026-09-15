@@ -17,6 +17,7 @@ import queue
 import shutil
 import ctypes
 import threading
+import webbrowser
 import subprocess
 import urllib.request
 import tkinter as tk
@@ -42,13 +43,24 @@ GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
 
 # Paleta (dark, estilo Discord)
-BG = "#2b2d31"
-CARD = "#313338"
-ACCENT = "#5865f2"
+BG = "#1e1f22"          # fundo geral (mais escuro)
+SIDEBAR = "#181920"     # barra lateral
+CARD = "#2b2d31"        # painéis / inputs
+CARD_HOVER = "#313338"
+INPUT_BG = "#1e1f22"
+BORDER = "#3f4147"
+ACCENT = "#5865f2"      # blurple
 ACCENT_HOVER = "#4752c4"
 TEXT = "#f2f3f5"
 TEXT_DIM = "#b5bac1"
+TEXT_MUTED = "#80848e"
 OK = "#23a55a"
+WARN = "#f0b232"
+LINK = "#00a8fc"
+
+WIN_W, WIN_H = 760, 560
+
+DISCORD_DEV_URL = "https://discord.com/developers/applications"
 
 
 def resource_path(rel: str) -> Path:
@@ -300,8 +312,148 @@ class Installer:
 
 
 # --------------------------------------------------------------------------- #
+# Widgets reutilizáveis
+# --------------------------------------------------------------------------- #
+
+class PillButton(tk.Frame):
+    """Botão arredondado (usa Canvas) com estados hover, com/sem preenchimento."""
+
+    def __init__(self, parent, text, command, primary=True, bg=BG,
+                 width=150, height=42):
+        super().__init__(parent, bg=bg)
+        self.command = command
+        self.primary = primary
+        self.bg = bg
+        self._enabled = True
+
+        self.fill = ACCENT if primary else CARD
+        self.fill_hover = ACCENT_HOVER if primary else CARD_HOVER
+        self.fg = TEXT
+
+        self.canvas = tk.Canvas(self, width=width, height=height, bg=bg,
+                                highlightthickness=0, bd=0, cursor="hand2")
+        self.canvas.pack()
+        self._w, self._h, self._r = width, height, height // 2
+        self._text = text
+        self._draw(self.fill)
+
+        for seq in ("<Enter>",):
+            self.canvas.bind(seq, lambda e: self._enabled and self._draw(self.fill_hover))
+        self.canvas.bind("<Leave>", lambda e: self._enabled and self._draw(self.fill))
+        self.canvas.bind("<Button-1>", self._click)
+
+    def _round_rect(self, x1, y1, x2, y2, r, **kw):
+        pts = [
+            x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+            x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+        ]
+        return self.canvas.create_polygon(pts, smooth=True, **kw)
+
+    def _draw(self, fill):
+        self.canvas.delete("all")
+        self._round_rect(1, 1, self._w - 1, self._h - 1, self._r, fill=fill)
+        self.canvas.create_text(self._w // 2, self._h // 2, text=self._text,
+                                fill=self.fg, font=("Segoe UI Semibold", 11))
+
+    def _click(self, _e):
+        if self._enabled and self.command:
+            self.command()
+
+    def set_enabled(self, value: bool):
+        self._enabled = value
+        self.canvas.configure(cursor="hand2" if value else "arrow")
+        self._draw(self.fill if value else CARD)
+        self.fg = TEXT if value else TEXT_MUTED
+        self._draw(self.fill if value else CARD)
+
+
+class Collapsible(tk.Frame):
+    """Painel 'Como pego isso?' que expande/recolhe com um passo a passo."""
+
+    def __init__(self, parent, title, steps, link=None, link_label=None, bg=BG):
+        super().__init__(parent, bg=bg)
+        self.bg = bg
+        self._open = False
+        self.link = link
+
+        self.header = tk.Label(
+            self, text=f"›  {title}", bg=bg, fg=LINK,
+            font=("Segoe UI", 9, "bold"), cursor="hand2", anchor="w",
+        )
+        self.header.pack(anchor="w")
+        self.header.bind("<Button-1>", lambda e: self.toggle())
+
+        self.body = tk.Frame(self, bg=CARD)
+        inner = tk.Frame(self.body, bg=CARD)
+        inner.pack(fill="x", padx=14, pady=12)
+        for i, step in enumerate(steps, 1):
+            row = tk.Frame(inner, bg=CARD)
+            row.pack(fill="x", anchor="w", pady=2)
+            tk.Label(row, text=f"{i}.", bg=CARD, fg=ACCENT,
+                     font=("Segoe UI Semibold", 9), width=2, anchor="w").pack(side="left")
+            tk.Label(row, text=step, bg=CARD, fg=TEXT_DIM, justify="left",
+                     font=("Segoe UI", 9), wraplength=420, anchor="w").pack(side="left")
+        if link:
+            lk = tk.Label(inner, text=link_label or link, bg=CARD, fg=LINK,
+                          font=("Segoe UI", 9, "underline"), cursor="hand2", anchor="w")
+            lk.pack(anchor="w", pady=(8, 0))
+            lk.bind("<Button-1>", lambda e: webbrowser.open(link))
+
+    def toggle(self):
+        self._open = not self._open
+        if self._open:
+            self.header.config(text=self.header.cget("text").replace("›", "⌄", 1))
+            self.body.pack(fill="x", pady=(6, 0))
+        else:
+            self.header.config(text=self.header.cget("text").replace("⌄", "›", 1))
+            self.body.forget()
+
+
+class Field(tk.Frame):
+    """Input estilizado com label, borda de foco e (opcional) botão mostrar/ocultar."""
+
+    def __init__(self, parent, label, textvar, placeholder="", secret=False, bg=BG):
+        super().__init__(parent, bg=bg)
+        self.secret = secret
+        self._shown = not secret
+
+        tk.Label(self, text=label, bg=bg, fg=TEXT_DIM,
+                 font=("Segoe UI Semibold", 9)).pack(anchor="w", pady=(0, 5))
+
+        self.box = tk.Frame(self, bg=INPUT_BG, highlightbackground=BORDER,
+                            highlightcolor=ACCENT, highlightthickness=1, bd=0)
+        self.box.pack(fill="x")
+
+        self.entry = tk.Entry(
+            self.box, textvariable=textvar, show="" if not secret else "•",
+            bg=INPUT_BG, fg=TEXT, insertbackground=TEXT, relief="flat", bd=0,
+            font=("Segoe UI", 11),
+        )
+        self.entry.pack(side="left", fill="x", expand=True, padx=(12, 6), ipady=9)
+        self.entry.bind("<FocusIn>", lambda e: self.box.config(highlightbackground=ACCENT))
+        self.entry.bind("<FocusOut>", lambda e: self.box.config(highlightbackground=BORDER))
+
+        if secret:
+            self.toggle_btn = tk.Label(self.box, text="👁", bg=INPUT_BG, fg=TEXT_MUTED,
+                                       font=("Segoe UI", 11), cursor="hand2")
+            self.toggle_btn.pack(side="right", padx=(0, 12))
+            self.toggle_btn.bind("<Button-1>", lambda e: self._toggle_secret())
+
+    def _toggle_secret(self):
+        self._shown = not self._shown
+        self.entry.config(show="" if self._shown else "•")
+        self.toggle_btn.config(fg=TEXT if self._shown else TEXT_MUTED)
+
+    def focus(self):
+        self.entry.focus_set()
+
+
+# --------------------------------------------------------------------------- #
 # Interface gráfica (wizard)
 # --------------------------------------------------------------------------- #
+
+WIZARD_STEPS = ["Boas-vindas", "Configuração", "Instalação", "Concluído"]
+
 
 class Wizard(tk.Tk):
     def __init__(self):
@@ -309,20 +461,69 @@ class Wizard(tk.Tk):
         self.title(f"{APP_NAME} - Instalador")
         self.configure(bg=BG)
         self.resizable(False, False)
-        self._center(560, 420)
+        self._center(WIN_W, WIN_H)
 
         self.token_var = tk.StringVar()
         self.guild_var = tk.StringVar()
         self.msg_queue: "queue.Queue" = queue.Queue()
         self.install_ok = False
+        self.current_step = 0
 
-        self._step_labels: list[tk.Label] = []
-        self.container = tk.Frame(self, bg=BG)
-        self.container.pack(fill="both", expand=True)
+        self._step_widgets: list[dict] = []
+
+        # Layout: sidebar (esquerda) + área de conteúdo (direita)
+        root = tk.Frame(self, bg=BG)
+        root.pack(fill="both", expand=True)
+
+        self.sidebar = tk.Frame(root, bg=SIDEBAR, width=210)
+        self.sidebar.pack(side="left", fill="y")
+        self.sidebar.pack_propagate(False)
+        self._build_sidebar()
+
+        self.content = tk.Frame(root, bg=BG)
+        self.content.pack(side="left", fill="both", expand=True)
 
         self.show_welcome()
 
-    # ---- layout helpers ---- #
+    # ---- sidebar ---- #
+    def _build_sidebar(self):
+        tk.Label(self.sidebar, text=APP_NAME, bg=SIDEBAR, fg=TEXT,
+                 font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=24, pady=(30, 4))
+        tk.Label(self.sidebar, text="Assistente de instalação", bg=SIDEBAR,
+                 fg=TEXT_MUTED, font=("Segoe UI", 9)).pack(anchor="w", padx=24)
+
+        steps_wrap = tk.Frame(self.sidebar, bg=SIDEBAR)
+        steps_wrap.pack(anchor="w", padx=20, pady=(36, 0), fill="x")
+
+        self._sidebar_items = []
+        for i, name in enumerate(WIZARD_STEPS):
+            row = tk.Frame(steps_wrap, bg=SIDEBAR)
+            row.pack(anchor="w", fill="x", pady=7)
+            dot = tk.Label(row, text="●", bg=SIDEBAR, fg=TEXT_MUTED,
+                           font=("Segoe UI", 11))
+            dot.pack(side="left", padx=(0, 10))
+            lbl = tk.Label(row, text=name, bg=SIDEBAR, fg=TEXT_MUTED,
+                           font=("Segoe UI", 10))
+            lbl.pack(side="left")
+            self._sidebar_items.append((dot, lbl))
+
+        tk.Label(self.sidebar, text="v1.1.0", bg=SIDEBAR, fg=TEXT_MUTED,
+                 font=("Segoe UI", 8)).pack(side="bottom", anchor="w", padx=24, pady=18)
+
+    def _set_step(self, index: int):
+        self.current_step = index
+        for i, (dot, lbl) in enumerate(self._sidebar_items):
+            if i < index:
+                dot.config(text="✓", fg=OK)
+                lbl.config(fg=TEXT_DIM)
+            elif i == index:
+                dot.config(text="●", fg=ACCENT)
+                lbl.config(fg=TEXT, font=("Segoe UI", 10, "bold"))
+            else:
+                dot.config(text="●", fg=TEXT_MUTED)
+                lbl.config(fg=TEXT_MUTED, font=("Segoe UI", 10))
+
+    # ---- helpers ---- #
     def _center(self, w: int, h: int):
         self.update_idletasks()
         x = (self.winfo_screenwidth() - w) // 2
@@ -330,77 +531,102 @@ class Wizard(tk.Tk):
         self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _clear(self):
-        for child in self.container.winfo_children():
+        for child in self.content.winfo_children():
             child.destroy()
 
-    def _title(self, parent, text: str):
-        tk.Label(
-            parent, text=text, bg=BG, fg=TEXT,
-            font=("Segoe UI", 18, "bold"),
-        ).pack(pady=(36, 8))
+    def _page(self, pad_x=44, pad_y=40):
+        f = tk.Frame(self.content, bg=BG)
+        f.pack(fill="both", expand=True, padx=pad_x, pady=pad_y)
+        return f
 
-    def _button(self, parent, text: str, command, primary=True):
-        b = tk.Button(
-            parent, text=text, command=command,
-            bg=ACCENT if primary else CARD,
-            fg=TEXT, activebackground=ACCENT_HOVER, activeforeground=TEXT,
-            relief="flat", font=("Segoe UI", 10, "bold"),
-            padx=18, pady=8, cursor="hand2", bd=0,
-        )
-        return b
+    def _heading(self, parent, title, subtitle=None):
+        tk.Label(parent, text=title, bg=BG, fg=TEXT,
+                 font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        if subtitle:
+            tk.Label(parent, text=subtitle, bg=BG, fg=TEXT_MUTED,
+                     font=("Segoe UI", 11), justify="left").pack(anchor="w", pady=(6, 0))
 
     # ---- Tela 1: boas-vindas ---- #
     def show_welcome(self):
         self._clear()
-        f = tk.Frame(self.container, bg=BG)
-        f.pack(fill="both", expand=True)
+        self._set_step(0)
+        f = self._page()
 
-        self._title(f, APP_NAME)
-        tk.Label(
-            f, text="Bem-vindo ao instalador.", bg=BG, fg=TEXT,
-            font=("Segoe UI", 12),
-        ).pack(pady=(4, 20))
+        tk.Label(f, text="👋", bg=BG, font=("Segoe UI Emoji", 40)).pack(anchor="w")
+        self._heading(
+            f, f"Bem-vindo ao\n{APP_NAME}",
+        )
         tk.Label(
             f,
-            text="Este assistente irá instalar e configurar\n"
-                 f"automaticamente o {APP_NAME}.",
-            bg=BG, fg=TEXT_DIM, font=("Segoe UI", 11), justify="center",
-        ).pack()
+            text="Este assistente instala e configura o bot automaticamente.\n"
+                 "Você só precisa informar o token e o ID do servidor — o resto\n"
+                 "é por nossa conta.",
+            bg=BG, fg=TEXT_DIM, font=("Segoe UI", 11), justify="left",
+        ).pack(anchor="w", pady=(18, 0))
 
-        self._button(f, "Avançar  >", self.show_config).pack(side="bottom", pady=32)
+        feats = tk.Frame(f, bg=BG)
+        feats.pack(anchor="w", pady=(24, 0))
+        for txt in (
+            "Instala o Python e as dependências pra você",
+            "Configura o bot pra iniciar sozinho com o Windows",
+            "Deixa tudo pronto e rodando em segundos",
+        ):
+            row = tk.Frame(feats, bg=BG)
+            row.pack(anchor="w", pady=3)
+            tk.Label(row, text="✓", bg=BG, fg=OK,
+                     font=("Segoe UI", 11, "bold")).pack(side="left", padx=(0, 10))
+            tk.Label(row, text=txt, bg=BG, fg=TEXT_DIM,
+                     font=("Segoe UI", 10)).pack(side="left")
+
+        bar = tk.Frame(f, bg=BG)
+        bar.pack(side="bottom", fill="x")
+        PillButton(bar, "Começar  →", self.show_config, bg=BG).pack(side="right")
 
     # ---- Tela 2: configuração do Discord ---- #
     def show_config(self):
         self._clear()
-        f = tk.Frame(self.container, bg=BG)
-        f.pack(fill="both", expand=True, padx=48)
+        self._set_step(1)
+        f = self._page(pad_y=34)
 
-        self._title(f, "Configuração do Discord")
+        self._heading(f, "Configuração do Discord",
+                      "Cole abaixo as credenciais do seu bot.")
 
-        tk.Label(f, text="Token do Bot", bg=BG, fg=TEXT_DIM,
-                 font=("Segoe UI", 10)).pack(anchor="w", pady=(20, 4))
-        token_entry = tk.Entry(
-            f, textvariable=self.token_var, show="•",
-            bg=CARD, fg=TEXT, insertbackground=TEXT, relief="flat",
-            font=("Segoe UI", 11),
-        )
-        token_entry.pack(fill="x", ipady=8)
+        # Token
+        token_field = Field(f, "TOKEN DO BOT", self.token_var, secret=True)
+        token_field.pack(fill="x", pady=(24, 6))
+        Collapsible(
+            f, "Como pego o token?",
+            steps=[
+                "Acesse o Portal de Desenvolvedores do Discord e abra a sua aplicação (ou crie uma nova).",
+                "No menu lateral, clique em \"Bot\".",
+                "Em \"Token\", clique em \"Reset Token\" e confirme.",
+                "Clique em \"Copy\" para copiar o token e cole aqui.",
+                "Guarde o token com segurança — ele dá controle total do bot.",
+            ],
+            link=DISCORD_DEV_URL,
+            link_label="Abrir o Portal de Desenvolvedores →",
+        ).pack(fill="x", pady=(0, 8))
 
-        tk.Label(f, text="ID do Servidor", bg=BG, fg=TEXT_DIM,
-                 font=("Segoe UI", 10)).pack(anchor="w", pady=(18, 4))
-        guild_entry = tk.Entry(
-            f, textvariable=self.guild_var,
-            bg=CARD, fg=TEXT, insertbackground=TEXT, relief="flat",
-            font=("Segoe UI", 11),
-        )
-        guild_entry.pack(fill="x", ipady=8)
+        # Guild ID
+        guild_field = Field(f, "ID DO SERVIDOR", self.guild_var)
+        guild_field.pack(fill="x", pady=(14, 6))
+        Collapsible(
+            f, "Como pego o ID do servidor?",
+            steps=[
+                "No Discord, abra Configurações do Usuário › Avançado e ative o \"Modo Desenvolvedor\".",
+                "Volte à lista de servidores, clique com o botão direito no ícone do seu servidor.",
+                "Escolha \"Copiar ID do servidor\".",
+                "Cole aqui — o ID é uma sequência só de números.",
+            ],
+        ).pack(fill="x", pady=(0, 8))
 
-        btns = tk.Frame(f, bg=BG)
-        btns.pack(side="bottom", fill="x", pady=28)
-        self._button(btns, "<  Voltar", self.show_welcome, primary=False).pack(side="left")
-        self._button(btns, "Avançar  >", self._validate_and_install).pack(side="right")
+        bar = tk.Frame(f, bg=BG)
+        bar.pack(side="bottom", fill="x")
+        PillButton(bar, "←  Voltar", self.show_welcome, primary=False,
+                   bg=BG, width=120).pack(side="left")
+        PillButton(bar, "Instalar  →", self._validate_and_install, bg=BG).pack(side="right")
 
-        token_entry.focus_set()
+        token_field.focus()
 
     def _validate_and_install(self):
         token = self.token_var.get().strip()
@@ -416,50 +642,65 @@ class Wizard(tk.Tk):
     # ---- Tela 3: instalação ---- #
     def show_install(self):
         self._clear()
-        f = tk.Frame(self.container, bg=BG)
-        f.pack(fill="both", expand=True, padx=48)
+        self._set_step(2)
+        f = self._page()
 
-        self._title(f, "Instalando...")
+        self._heading(f, "Instalando…",
+                      "Isso leva alguns segundos. Pode deixar rodando.")
 
         steps_frame = tk.Frame(f, bg=BG)
-        steps_frame.pack(anchor="w", pady=(12, 20))
-        self._step_labels = []
+        steps_frame.pack(anchor="w", fill="x", pady=(26, 20))
+        self._step_widgets = []
         for step in Installer.STEPS:
-            lbl = tk.Label(
-                steps_frame, text=f"○  {step}", bg=BG, fg=TEXT_DIM,
-                font=("Segoe UI", 11), anchor="w",
-            )
-            lbl.pack(anchor="w", pady=3)
-            self._step_labels.append(lbl)
+            row = tk.Frame(steps_frame, bg=BG)
+            row.pack(anchor="w", fill="x", pady=5)
+            icon = tk.Label(row, text="○", bg=BG, fg=TEXT_MUTED,
+                            font=("Segoe UI", 12), width=2)
+            icon.pack(side="left")
+            lbl = tk.Label(row, text=step, bg=BG, fg=TEXT_MUTED,
+                           font=("Segoe UI", 11), anchor="w")
+            lbl.pack(side="left")
+            self._step_widgets.append({"icon": icon, "label": lbl})
 
         style = ttk.Style(self)
         style.theme_use("default")
         style.configure(
             "Fica.Horizontal.TProgressbar",
             troughcolor=CARD, background=ACCENT, bordercolor=BG,
-            lightcolor=ACCENT, darkcolor=ACCENT, thickness=18,
+            lightcolor=ACCENT, darkcolor=ACCENT, thickness=10,
         )
+        bottom = tk.Frame(f, bg=BG)
+        bottom.pack(side="bottom", fill="x")
+        self.pct_label = tk.Label(bottom, text="0%", bg=BG, fg=TEXT_DIM,
+                                  font=("Segoe UI Semibold", 10))
+        self.pct_label.pack(anchor="w", pady=(0, 6))
         self.progress = ttk.Progressbar(
-            f, style="Fica.Horizontal.TProgressbar",
+            bottom, style="Fica.Horizontal.TProgressbar",
             mode="determinate", maximum=100,
         )
-        self.progress.pack(fill="x", side="bottom", pady=(0, 24))
-        self.pct_label = tk.Label(f, text="0%", bg=BG, fg=TEXT_DIM,
-                                  font=("Segoe UI", 10))
-        self.pct_label.pack(side="bottom", pady=(0, 4))
+        self.progress.pack(fill="x")
 
-        # Inicia a instalação em background e monitora a fila
+        self._mark_active(0)
+
         installer = Installer(self.token_var.get(), self.guild_var.get(), self.msg_queue)
         threading.Thread(target=installer.run, daemon=True).start()
         self.after(100, self._poll_queue)
+
+    def _mark_active(self, index: int):
+        if 0 <= index < len(self._step_widgets):
+            w = self._step_widgets[index]
+            w["icon"].config(text="◐", fg=ACCENT)
+            w["label"].config(fg=TEXT, font=("Segoe UI Semibold", 11))
 
     def _poll_queue(self):
         try:
             while True:
                 kind, payload = self.msg_queue.get_nowait()
                 if kind == "step":
-                    lbl = self._step_labels[payload]
-                    lbl.config(text=f"✓  {Installer.STEPS[payload]}", fg=OK)
+                    w = self._step_widgets[payload]
+                    w["icon"].config(text="✓", fg=OK)
+                    w["label"].config(fg=TEXT_DIM, font=("Segoe UI", 11))
+                    self._mark_active(payload + 1)
                 elif kind == "progress":
                     self.progress["value"] = payload
                     self.pct_label.config(text=f"{payload}%")
@@ -482,31 +723,38 @@ class Wizard(tk.Tk):
     # ---- Tela 4: conclusão ---- #
     def show_done(self):
         self._clear()
-        f = tk.Frame(self.container, bg=BG)
-        f.pack(fill="both", expand=True)
+        self._set_step(3)
+        f = self._page()
 
-        tk.Label(f, text="🎉  Instalação concluída!", bg=BG, fg=TEXT,
-                 font=("Segoe UI", 18, "bold")).pack(pady=(40, 12))
-        tk.Label(f, text=f"{APP_NAME} está rodando.", bg=BG, fg=TEXT_DIM,
-                 font=("Segoe UI", 12)).pack()
-        tk.Label(f, text="Status:  🟢 ONLINE", bg=BG, fg=OK,
-                 font=("Segoe UI", 13, "bold")).pack(pady=(16, 30))
+        tk.Label(f, text="🎉", bg=BG, font=("Segoe UI Emoji", 44)).pack(anchor="w")
+        self._heading(f, "Tudo pronto!",
+                      f"O {APP_NAME} foi instalado e já está rodando.")
 
-        btns = tk.Frame(f, bg=BG)
-        btns.pack(side="bottom", pady=32)
-        self._button(btns, "Abrir pasta", self._open_folder, primary=False).pack(side="left", padx=6)
-        self._button(btns, "Ver logs", self._open_logs, primary=False).pack(side="left", padx=6)
-        self._button(btns, "Finalizar", self.destroy).pack(side="left", padx=6)
+        status = tk.Frame(f, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
+        status.pack(fill="x", pady=(24, 0))
+        inner = tk.Frame(status, bg=CARD)
+        inner.pack(fill="x", padx=18, pady=16)
+        tk.Label(inner, text="🟢", bg=CARD, font=("Segoe UI Emoji", 13)).pack(side="left")
+        tk.Label(inner, text="Status:  ONLINE", bg=CARD, fg=OK,
+                 font=("Segoe UI Semibold", 12)).pack(side="left", padx=(10, 0))
+        tk.Label(f, text="O bot inicia sozinho toda vez que você ligar o computador.",
+                 bg=BG, fg=TEXT_MUTED, font=("Segoe UI", 10)).pack(anchor="w", pady=(14, 0))
+
+        bar = tk.Frame(f, bg=BG)
+        bar.pack(side="bottom", fill="x")
+        PillButton(bar, "Concluir", self.destroy, bg=BG, width=130).pack(side="right")
+        PillButton(bar, "Ver logs", self._open_logs, primary=False,
+                   bg=BG, width=120).pack(side="left")
+        PillButton(bar, "Abrir pasta", self._open_folder, primary=False,
+                   bg=BG, width=130).pack(side="left", padx=(0, 10))
 
     def _open_folder(self):
         os.startfile(str(INSTALL_DIR))  # noqa: S606
 
     def _open_logs(self):
         log = INSTALL_DIR / "logs" / "bot.log"
-        if log.exists():
-            os.startfile(str(log))  # noqa: S606
-        else:
-            os.startfile(str(INSTALL_DIR / "logs"))  # noqa: S606
+        target = log if log.exists() else (INSTALL_DIR / "logs")
+        os.startfile(str(target))  # noqa: S606
 
 
 def main():

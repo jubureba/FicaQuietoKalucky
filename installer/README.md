@@ -4,10 +4,15 @@ Gera um único arquivo `FicaQuietoKalucky-Setup.exe` que o usuário final abre c
 dois cliques. O instalador tem 4 telas e cuida de tudo automaticamente:
 
 1. **Boas-vindas**
-2. **Configuração do Discord** — Token do Bot + ID do Servidor
+2. **Configuração do Discord** — Token do Bot + ID do Servidor, com painéis de
+   ajuda expansíveis (**"Como pego o token?"** e **"Como pego o ID do servidor?"**)
+   explicando o passo a passo e com link direto para o Portal de Desenvolvedores
 3. **Instalação** — prepara ambiente, instala Python, dependências, cria a
    configuração, configura o serviço de autostart e inicia o bot
-4. **Conclusão** — status ONLINE + `Abrir pasta`, `Ver logs`, `Finalizar`
+4. **Conclusão** — status ONLINE + `Abrir pasta`, `Ver logs`, `Concluir`
+
+A interface tem barra lateral com o progresso das etapas, tema dark estilo
+Discord, campos com botão de mostrar/ocultar o token e botões arredondados.
 
 ## O que o instalador faz na máquina do usuário
 
