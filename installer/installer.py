@@ -315,45 +315,46 @@ class Installer:
 # Widgets reutilizáveis
 # --------------------------------------------------------------------------- #
 
-class PillButton(tk.Frame):
-    """Botão arredondado (usa Canvas) com estados hover, com/sem preenchimento."""
+class PillButton(tk.Canvas):
+    """Botão arredondado (Canvas) com estados hover, com/sem preenchimento.
+
+    Subclasse de tk.Canvas para que .pack()/.grid() funcionem direto no widget,
+    sem um Frame intermediário (evita conflito do kwarg 'width' com o geometry
+    manager).
+    """
 
     def __init__(self, parent, text, command, primary=True, bg=BG,
-                 width=150, height=42):
-        super().__init__(parent, bg=bg)
+                 btn_width=150, btn_height=42):
+        super().__init__(parent, width=btn_width, height=btn_height, bg=bg,
+                         highlightthickness=0, bd=0, cursor="hand2")
         self.command = command
         self.primary = primary
-        self.bg = bg
         self._enabled = True
 
         self.fill = ACCENT if primary else CARD
         self.fill_hover = ACCENT_HOVER if primary else CARD_HOVER
         self.fg = TEXT
 
-        self.canvas = tk.Canvas(self, width=width, height=height, bg=bg,
-                                highlightthickness=0, bd=0, cursor="hand2")
-        self.canvas.pack()
-        self._w, self._h, self._r = width, height, height // 2
+        self._w, self._h, self._r = btn_width, btn_height, btn_height // 2
         self._text = text
         self._draw(self.fill)
 
-        for seq in ("<Enter>",):
-            self.canvas.bind(seq, lambda e: self._enabled and self._draw(self.fill_hover))
-        self.canvas.bind("<Leave>", lambda e: self._enabled and self._draw(self.fill))
-        self.canvas.bind("<Button-1>", self._click)
+        self.bind("<Enter>", lambda e: self._enabled and self._draw(self.fill_hover))
+        self.bind("<Leave>", lambda e: self._enabled and self._draw(self.fill))
+        self.bind("<Button-1>", self._click)
 
     def _round_rect(self, x1, y1, x2, y2, r, **kw):
         pts = [
             x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
             x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
         ]
-        return self.canvas.create_polygon(pts, smooth=True, **kw)
+        return self.create_polygon(pts, smooth=True, **kw)
 
     def _draw(self, fill):
-        self.canvas.delete("all")
+        self.delete("all")
         self._round_rect(1, 1, self._w - 1, self._h - 1, self._r, fill=fill)
-        self.canvas.create_text(self._w // 2, self._h // 2, text=self._text,
-                                fill=self.fg, font=("Segoe UI Semibold", 11))
+        self.create_text(self._w // 2, self._h // 2, text=self._text,
+                         fill=self.fg, font=("Segoe UI Semibold", 11))
 
     def _click(self, _e):
         if self._enabled and self.command:
@@ -361,8 +362,7 @@ class PillButton(tk.Frame):
 
     def set_enabled(self, value: bool):
         self._enabled = value
-        self.canvas.configure(cursor="hand2" if value else "arrow")
-        self._draw(self.fill if value else CARD)
+        self.configure(cursor="hand2" if value else "arrow")
         self.fg = TEXT if value else TEXT_MUTED
         self._draw(self.fill if value else CARD)
 
@@ -623,7 +623,7 @@ class Wizard(tk.Tk):
         bar = tk.Frame(f, bg=BG)
         bar.pack(side="bottom", fill="x")
         PillButton(bar, "←  Voltar", self.show_welcome, primary=False,
-                   bg=BG, width=120).pack(side="left")
+                   bg=BG, btn_width=120).pack(side="left")
         PillButton(bar, "Instalar  →", self._validate_and_install, bg=BG).pack(side="right")
 
         token_field.focus()
@@ -742,11 +742,11 @@ class Wizard(tk.Tk):
 
         bar = tk.Frame(f, bg=BG)
         bar.pack(side="bottom", fill="x")
-        PillButton(bar, "Concluir", self.destroy, bg=BG, width=130).pack(side="right")
+        PillButton(bar, "Concluir", self.destroy, bg=BG, btn_width=130).pack(side="right")
         PillButton(bar, "Ver logs", self._open_logs, primary=False,
-                   bg=BG, width=120).pack(side="left")
+                   bg=BG, btn_width=120).pack(side="left")
         PillButton(bar, "Abrir pasta", self._open_folder, primary=False,
-                   bg=BG, width=130).pack(side="left", padx=(0, 10))
+                   bg=BG, btn_width=130).pack(side="left", padx=(0, 10))
 
     def _open_folder(self):
         os.startfile(str(INSTALL_DIR))  # noqa: S606
