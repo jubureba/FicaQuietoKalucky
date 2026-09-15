@@ -507,7 +507,7 @@ class Wizard(tk.Tk):
             lbl.pack(side="left")
             self._sidebar_items.append((dot, lbl))
 
-        tk.Label(self.sidebar, text="v1.1.0", bg=SIDEBAR, fg=TEXT_MUTED,
+        tk.Label(self.sidebar, text="v1.1.1", bg=SIDEBAR, fg=TEXT_MUTED,
                  font=("Segoe UI", 8)).pack(side="bottom", anchor="w", padx=24, pady=18)
 
     def _set_step(self, index: int):
